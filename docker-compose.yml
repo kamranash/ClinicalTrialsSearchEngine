@@ -1,0 +1,42 @@
+services:
+
+  # ── Model registry backend ────────────────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      DATA_DIR: "/data"
+    volumes:
+      - model-data:/data        # persists model versions across restarts
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 8s
+      retries: 3
+
+  # ── React frontend (nginx) ────────────────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:80"               # open http://localhost:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - internal
+
+volumes:
+  model-data:                   # named volume — survives docker compose down
+
+networks:
+  internal:
+    driver: bridge
