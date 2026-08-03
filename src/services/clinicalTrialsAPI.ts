@@ -140,42 +140,56 @@ export interface SearchFilters {
   pageSize?: number;
 }
 
-// Live free-text search against ClinicalTrials.gov API
-export async function searchClinicalTrials(
-  query: string,
-  filters: SearchFilters = {}
-): Promise<CTStudy[]> {
+export interface SearchPage {
+  studies: CTStudy[];
+  nextPageToken?: string;
+  totalCount: number;
+}
+
+function buildSearchParams(query: string, filters: SearchFilters, pageToken?: string): URLSearchParams {
   const params = new URLSearchParams();
   if (query.trim()) params.set('query.term', query.trim());
-
-  // Phase filter
-  if (filters.phase?.length) {
-    params.set('filter.phase', filters.phase.join(' OR '));
-  }
-  // Status filter
-  if (filters.status?.length) {
-    params.set('filter.overallStatus', filters.status.join(','));
-  }
-
-  params.set('pageSize', String(filters.pageSize ?? 25));
+  if (filters.phase?.length) params.set('filter.advanced', `AREA[Phase]${filters.phase.map(p => `(${p})`).join(' OR ')}`);
+  if (filters.status?.length) params.set('filter.overallStatus', filters.status.join(','));
+  params.set('pageSize', String(filters.pageSize ?? 100));
+  params.set('countTotal', 'true');
   params.set('format', 'json');
+  if (pageToken) params.set('pageToken', pageToken);
+  return params;
+}
 
-  const url = `/ct-api/studies?${params.toString()}`;
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+// Paginated live search — returns one page of results plus pagination metadata
+export async function searchClinicalTrialsPage(
+  query: string,
+  filters: SearchFilters = {},
+  pageToken?: string
+): Promise<SearchPage> {
+  const params = buildSearchParams(query, filters, pageToken);
+  const res = await fetch(`/ct-api/studies?${params}`, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`CT API ${res.status}: ${res.statusText}`);
-  const data = await res.json() as { studies?: Record<string, unknown>[] };
+  const data = await res.json() as {
+    studies?: Record<string, unknown>[];
+    nextPageToken?: string;
+    totalCount?: number;
+  };
   const studies: CTStudy[] = [];
   for (const raw of data.studies ?? []) {
     const s = extractStudy(raw);
     if (s) {
-      // Apply sponsor filter client-side (not supported in query params)
       if (filters.sponsorClass?.length && !filters.sponsorClass.includes(s.sponsorClass)) continue;
-      // Apply phase client-side fallback
-      if (filters.phase?.length && !filters.phase.includes(s.primaryPhase)) continue;
       studies.push(s);
     }
   }
-  return studies;
+  return { studies, nextPageToken: data.nextPageToken, totalCount: data.totalCount ?? studies.length };
+}
+
+// Legacy single-page search kept for TrialSearchPanel overlay
+export async function searchClinicalTrials(
+  query: string,
+  filters: SearchFilters = {}
+): Promise<CTStudy[]> {
+  const page = await searchClinicalTrialsPage(query, { ...filters, pageSize: filters.pageSize ?? 50 });
+  return page.studies;
 }
 
 // Fetch up to `pageSize` studies using the given search terms

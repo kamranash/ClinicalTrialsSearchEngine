@@ -155,11 +155,15 @@ export default function App() {
             width: 32, height: 32, borderRadius: 8, border: 'none', cursor: 'pointer',
             background: 'var(--surface2)', color: 'var(--text-muted)', fontSize: 15,
           }}>↺</button>
-          <button onClick={() => setShowFinder(true)} style={{
+          <a href="/search" style={{
             padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            fontWeight: 700, fontSize: 12, color: '#fff', marginLeft: 4,
-            background: 'linear-gradient(135deg,#6366f1,#22d3ee)',
-          }}>🔬 Find Trials</button>
+            fontWeight: 700, fontSize: 12, color: '#fff', marginLeft: 4, textDecoration: 'none',
+            background: 'linear-gradient(135deg,#6366f1,#22d3ee)', display: 'inline-block',
+          }}>🔬 Find Trials</a>
+          <button onClick={() => setShowFinder(true)} title="Quick search overlay" style={{
+            padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+            fontWeight: 700, fontSize: 12, color: 'var(--text-muted)', background: 'var(--surface2)',
+          }}>⊞</button>
           <button onClick={openSaveDialog} disabled={history.length === 0} style={{
             padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer',
             fontWeight: 700, fontSize: 12, color: '#fff', marginLeft: 2,
