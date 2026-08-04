@@ -1,6 +1,11 @@
 # ClinicalTrials Search Engine — DNN Dashboard
 
-An interactive deep neural network training dashboard that uses real clinical trial data from [ClinicalTrials.gov](https://clinicaltrials.gov) as its training set. The model learns to predict the **clinical trial phase** (Phase I–IV) from 16 structured features extracted from trial metadata.
+Two apps in one repository:
+
+| App | URL | Description |
+|---|---|---|
+| **Clinical Trials Search** | `/search` | Standalone full-text search over the entire ClinicalTrials.gov database — no login required |
+| **DNN Dashboard** | `/` | Interactive deep neural network training dashboard using real CT.gov data as its training set |
 
 ---
 
@@ -30,9 +35,9 @@ An interactive deep neural network training dashboard that uses real clinical tr
 
 | Feature | Description |
 |---|---|
+| **Clinical Trials Search** | Standalone page at `/search` — search 500,000+ trials from ClinicalTrials.gov with filters, pagination, and "Load more" |
 | **Live Training Simulation** | Epoch-by-epoch MLP training with configurable optimizer, scheduler, lr, batch size, dropout, and weight decay |
 | **Real Clinical Trial Data** | Fetches 500+ studies from ClinicalTrials.gov API v2 and extracts 16 numerical features |
-| **Clinical Trial Finder** | Full-screen search overlay — query CT.gov in real-time, filter by phase / status / sponsor |
 | **Model Version Registry** | Save, compare, restore, and annotate model checkpoints via a persistent Express backend |
 | **Gradient Visualizer** | Per-layer gradient norm heatmap with vanishing/exploding gradient detection |
 | **Activation Inspector** | Per-layer activation distribution histograms by epoch |
@@ -49,6 +54,9 @@ An interactive deep neural network training dashboard that uses real clinical tr
 ```mermaid
 graph TB
     subgraph Browser["Browser (React + TypeScript)"]
+        MAIN[main.tsx — path-based router]
+        MAIN -- "/" --> UI
+        MAIN -- "/search" --> SP[SearchPage]
         UI[App.tsx — Layout & Controls]
         UI --> MP[MetricsPanel]
         UI --> AP[ArchitecturePanel]
@@ -57,7 +65,7 @@ graph TB
         UI --> IP[InferencePanel]
         UI --> BP[BackpropPanel]
         UI --> DP[DatasetPanel]
-        UI --> TSP[TrialSearchPanel]
+        UI --> TSP[TrialSearchPanel overlay]
         UI --> MVP[ModelVersionPanel]
     end
 
@@ -84,6 +92,7 @@ graph TB
     UI --> UT
     UI --> UCT
     UCT --> CTA
+    SP --> CTA
     UI --> MR
     MR -- /api --> REG
     CTA -- /ct-api --> CTGOV
@@ -93,9 +102,12 @@ graph TB
 
 ```mermaid
 graph TD
-    App["App.tsx"]
+    MAIN["main.tsx\n(path router)"]
 
-    App --> Header["Header Bar\n(status · progress · controls)"]
+    MAIN -- "/" --> App["App.tsx"]
+    MAIN -- "/search" --> SP["SearchPage.tsx\n(standalone search)"]
+
+    App --> Header["Header Bar\n(status · progress · controls)"] 
     App --> Grid["3×2 Panel Grid"]
 
     Grid --> TL["Top-Left\nArchitecturePanel"]
@@ -138,11 +150,22 @@ sequenceDiagram
     App->>ModelVersionPanel: refreshTrigger++
 
     User->>App: Click 🔬 Find Trials
-    App->>TrialSearchPanel: open
+    App->>TrialSearchPanel: open overlay
     User->>TrialSearchPanel: Type query + Search
     TrialSearchPanel->>clinicalTrialsAPI: searchClinicalTrials(query, filters)
     clinicalTrialsAPI->>CTgov: GET /ct-api/studies?query.term=...
     CTgov-->>TrialSearchPanel: CTStudy[] results
+
+    Note over User,CTgov: Standalone search page (/search)
+    User->>SearchPage: Navigate to /search
+    User->>SearchPage: Type query + Search
+    SearchPage->>clinicalTrialsAPI: searchClinicalTrialsPage(query, filters)
+    clinicalTrialsAPI->>CTgov: GET /ct-api/studies?pageSize=100&countTotal=true...
+    CTgov-->>SearchPage: CTStudy[] + nextPageToken + totalCount
+    User->>SearchPage: Click Load more
+    SearchPage->>clinicalTrialsAPI: searchClinicalTrialsPage(query, filters, pageToken)
+    clinicalTrialsAPI->>CTgov: GET /ct-api/studies?pageToken=...
+    CTgov-->>SearchPage: next page of CTStudy[]
 ```
 
 ### MLP Model Architecture
@@ -210,16 +233,19 @@ Softmax → P(Phase I | II | III | IV)
 ```
 clinicaltrials/
 ├── src/
-│   ├── App.tsx                   # Root layout, hooks wired, save dialog
+│   ├── App.tsx                   # DNN dashboard root layout, hooks wired, save dialog
 │   ├── index.css                 # Global CSS variables (dark theme)
-│   ├── main.tsx                  # React entry point
+│   ├── main.tsx                  # React entry point + path-based router (/ vs /search)
+│   │
+│   ├── pages/
+│   │   └── SearchPage.tsx        # Standalone clinical trials search (/search)
 │   │
 │   ├── hooks/
 │   │   ├── useTraining.ts        # Training simulation engine (epoch stepper)
 │   │   └── useClinicalTrials.ts  # CT.gov fetch + state management
 │   │
 │   ├── services/
-│   │   ├── clinicalTrialsAPI.ts  # CT.gov API client, feature extractor, search
+│   │   ├── clinicalTrialsAPI.ts  # CT.gov API client, feature extractor, paginated search
 │   │   └── modelRegistry.ts     # Model version CRUD (talks to Express backend)
 │   │
 │   └── panels/
@@ -230,7 +256,7 @@ clinicaltrials/
 │       ├── HyperParamPanel.tsx   # Hyperparameter sliders/dropdowns
 │       ├── InferencePanel.tsx    # Phase prediction on sample NCT IDs
 │       ├── DatasetPanel.tsx      # CT.gov dataset browser + statistics
-│       ├── TrialSearchPanel.tsx  # Full-screen trial search overlay
+│       ├── TrialSearchPanel.tsx  # In-dashboard search overlay (quick access)
 │       └── ModelVersionPanel.tsx # Saved version list + restore
 │
 ├── server/
@@ -240,7 +266,7 @@ clinicaltrials/
 │
 ├── Dockerfile                    # Multi-stage: node:20-alpine → nginx:1.27-alpine
 ├── docker-compose.yml            # frontend + backend + model-data volume
-├── nginx.conf                    # SPA + /ct-api + /api proxies
+├── nginx.conf                    # SPA fallback + /ct-api rewrite proxy + /api variable proxy
 ├── vite.config.ts                # Dev proxies: /ct-api → CT.gov, /api → :3001
 └── package.json
 ```
@@ -267,7 +293,7 @@ DATA_DIR=/tmp/clinicaltrials-models node server/index.js &
 npm run dev -- --port 5174
 ```
 
-Open **http://localhost:5174**
+Open **http://localhost:5174** for the DNN dashboard, **http://localhost:5174/search** for the search page.
 
 The Vite dev server proxies:
 - `/ct-api/*` → `https://clinicaltrials.gov/api/v2/*`
@@ -279,7 +305,11 @@ The Vite dev server proxies:
 # Build and start both containers
 docker compose up --build -d
 
-# Open http://localhost:8080
+# Open DNN dashboard
+open http://localhost:8080
+
+# Open standalone search
+open http://localhost:8080/search
 
 # Stop (model data persists in named volume)
 docker compose down
@@ -293,6 +323,15 @@ The `model-data` named Docker volume keeps `models.json` alive across restarts a
 ---
 
 ## Panel Reference
+
+### SearchPage (standalone — `/search`)
+Full-page clinical trials search accessible to any user without the DNN dashboard.
+- Searches the **entire** ClinicalTrials.gov database (500,000+ trials) in real time
+- **100 results per page** with cursor-based **Load more** pagination via `pageToken`
+- Displays total match count from CT.gov alongside a per-phase breakdown
+- Filters: phase (I–IV), recruitment status, sponsor class
+- Keyword highlighting in result titles, expandable detail cards, direct CT.gov links
+- Navigates back to the dashboard via the header link
 
 ### MetricsPanel
 Two SVG line charts updating in real-time each epoch:
@@ -330,15 +369,12 @@ Sliders and dropdowns for all training hyperparameters. Any change resets traini
 - **Feature importance** bar chart (simulated)
 - **Study browser** — scroll through individual studies
 
-### TrialSearchPanel (overlay)
-Full-screen slide-in drawer opened via **🔬 Find Trials** in the header. Two modes:
-
-| Mode | Description |
-|---|---|
-| **Live** | Queries ClinicalTrials.gov API in real-time (up to 50 results) |
-| **Local** | Filters the already-fetched in-memory dataset |
+### TrialSearchPanel (dashboard overlay)
+Quick-access slide-in drawer opened via the **⊞** icon in the dashboard header. Live search only (no local-dataset mode).
 
 Filter chips: phase (I–IV), recruitment status, sponsor class. Cards expand to show study attributes and link to CT.gov.
+
+For a full unbounded search experience use the **[standalone search page](#searchpage-standalone----search)** at `/search`.
 
 ### InferencePanel
 Runs phase predictions on 6 pre-loaded NCT IDs. Shows predicted phase, confidence %, probability bars for all 4 phases, and feature contribution pills.
@@ -390,11 +426,23 @@ Returns `{ "status": "ok", "models": <count> }`.
 
 ### ClinicalTrials.gov Proxy
 
-Both Vite and nginx proxy `/ct-api/*` → `https://clinicaltrials.gov/api/v2/*`.
+Both Vite (`rewrite` in `vite.config.ts`) and nginx (`rewrite+break` in `nginx.conf`) proxy `/ct-api/*` → `https://clinicaltrials.gov/api/v2/*`.
 
-**Search studies**:
+> **nginx note**: A `rewrite ^/ct-api/(.*)$ /api/v2/$1 break` rule is used instead of path-in-`proxy_pass` because nginx disables automatic path substitution when the `proxy_pass` URL contains a variable.
+
+**Search studies (single page)**:
 ```
-GET /ct-api/studies?query.term=ketamine&pageSize=50&format=json
+GET /ct-api/studies?query.term=ketamine&pageSize=100&format=json&countTotal=true
+```
+
+**Paginate to next page**:
+```
+GET /ct-api/studies?query.term=ketamine&pageSize=100&format=json&countTotal=true&pageToken=<token>
+```
+
+Response shape:
+```json
+{ "studies": [...], "nextPageToken": "abc123", "totalCount": 4821 }
 ```
 
 Full API reference: https://clinicaltrials.gov/data-api/api
